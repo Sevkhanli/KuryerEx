@@ -1,6 +1,5 @@
 package org.example.security;
 
-
 import lombok.RequiredArgsConstructor;
 import org.example.entities.User;
 import org.example.enums.Role;
@@ -15,7 +14,6 @@ import java.util.List;
 public class CustomUserDetails implements UserDetails {
 
     private final User user;
-
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -32,10 +30,28 @@ public class CustomUserDetails implements UserDetails {
         return user.getEmail();
     }
 
-    @Override public boolean isAccountNonExpired() { return UserDetails.super.isAccountNonExpired(); }
-    @Override public boolean isAccountNonLocked() { return UserDetails.super.isAccountNonLocked(); }
-    @Override public boolean isCredentialsNonExpired() { return UserDetails.super.isCredentialsNonExpired(); }
-    @Override public boolean isEnabled() { return UserDetails.super.isEnabled(); }
+    // 🛑 ƏSAS DÜZƏLİŞ: Hesabın aktiv (təsdiqlənmiş) olub-olmadığını yoxlayır.
+    // Bu metod `false` qaytarsa, Spring Security DisabledException atır.
+    @Override
+    public boolean isEnabled() {
+        return user.isVerified();
+    }
+
+    // Bu metodları əvvəlki kimi `true` olaraq saxlayırıq (və ya sadələşdiririk)
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
 
     public Role getRole() {
         return user.getRole();

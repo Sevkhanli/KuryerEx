@@ -24,34 +24,61 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
-        System.out.println("JwtAuthFilter is processing request: " + request.getRequestURI());
         final String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        final String requestPath = request.getRequestURI();
+
+        // 1. Token Tələb Olunmayan Yollar üçün Xüsusi Keçid
+        // Bu yollarda yoxlama AuthhController-də edilir.
+        if (requestPath.equals("/api/auth/verify") || requestPath.equals("/api/auth/resend-otp")) {
+            // Header-də token olsa da, olmasa da, birbaşa Controller-ə buraxırıq.
+            // Controller özü tokeni yoxlayır və InvalidTokenException (401) atır.
             filterChain.doFilter(request, response);
-            System.out.println("No Authorization header found or does not start with 'Bearer '");
             return;
-
         }
-        System.out.println("Authorization header found: " + authHeader);
-        String token = authHeader.substring(7);
-        String email = jwtService.findUsername(token);
-        Long userId = jwtService.extractUserId(token);
 
+        // 2. Header Yoxlanışı (Yalnız ACCESS və REFRESH token tələb edən yollar üçün)
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            // Header yoxdursa, filter zəncirini davam etdir.
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        String token = authHeader.substring(7);
+        String email;
+
+        try {
+            email = jwtService.findUsername(token);
+        } catch (Exception e) {
+            // Token vaxtı bitibsə (qorunan yoldadırsa), sadəcə set etmədən davam edir.
+            // Əgər qorunan yoldursa, sonda 401 alınacaq.
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // 3. Autentifikasiya Yoxlanışı (Yalnız ACCESS Token üçün)
         if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            // Biz artıq yuxarıda /verify və /resend-otp-ni ayırdıq,
+            // ona görə burada sadəcə ACCESS tokenləri yoxlayırıq.
+
             var userDetails = userDetailsService.loadUserByUsername(email);
-            System.out.println("User details loaded for email: " + email);
-            if (jwtService.tokenControl(token, userDetails)) {
+            String tokenType = null;
+
+            try {
+                tokenType = jwtService.exportToken(token, claims -> (String) claims.get("type"));
+            } catch (Exception ignored) {
+                // Token tipi çıxarıla bilmirsə, davam edirik (təhlükəsizlik üçün 401 alınacaq)
+            }
+
+            if ("ACCESS".equals(tokenType) && jwtService.tokenControl(token, userDetails)) {
                 var authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
-                System.out.println("Creating authentication token for user: " + userDetails.getUsername());
                 authToken.setDetails(
                         new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authToken);
-                System.out.println("Authentication set in SecurityContext for user: " + userDetails.getUsername());
             }
         }
-        System.out.println("Continuing filter chain for request: " + request.getRequestURI());
+
         filterChain.doFilter(request, response);
     }
 }

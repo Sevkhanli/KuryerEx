@@ -5,8 +5,6 @@ import jakarta.validation.constraints.Email;
 import lombok.*;
 import org.example.enums.Role;
 
-import java.time.LocalDateTime;
-
 @Entity
 @Table(name = "users")
 @Data
@@ -24,17 +22,15 @@ public class User {
     private String phoneNumber;
 
     @Email(message = "email duzgun deyil")
-    @Column(name = "email",nullable = false)
+    @Column(name = "email", nullable = false, unique = true)
     private String email;
-    @Column(name = "password",nullable = false)
+
+    @Column(name = "password", nullable = false)
     private String password;
 
     private boolean isVerified = false;
-    private String otpCode;
-    private LocalDateTime otpExpirationTime;
-
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role",nullable = false)
+    @Column(name = "role", nullable = false)
     private Role role;
 }

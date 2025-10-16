@@ -5,7 +5,8 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-import org.springframework.beans.factory.annotation.Value; // DÜZGÜN İMPORT
+import io.jsonwebtoken.ExpiredJwtException;
+import org.springframework.beans.factory.annotation.Value;
 import org.example.entities.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
@@ -41,7 +42,7 @@ public class JwtService {
         return exportToken(token, claims -> (String) claims.get("role"));
     }
 
-    private <T> T exportToken(String token, Function<Claims, T> claimsResolver) {
+    public <T> T exportToken(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getKey())
                 .build()
@@ -55,23 +56,79 @@ public class JwtService {
         return Keys.hmacShaKeyFor(key);
     }
 
-    public boolean tokenControl(String jwt, UserDetails userDetails) {
-        final String username = findUsername(jwt);
-        System.out.println("Username from token: " + username + " " + userDetails.getUsername() +" " + exportToken(jwt, Claims::getExpiration).before(new Date()));
-        return (username.equals(userDetails.getUsername())
-                && !exportToken(jwt, Claims::getExpiration).before(new Date()));
+    // Tokenin vaxtının bitib-bitmədiyini yoxlayır
+    public boolean isTokenExpired(String token) {
+        try {
+            return exportToken(token, Claims::getExpiration).before(new Date());
+        } catch (ExpiredJwtException e) {
+            // Vaxt aşımını düzgün idarə etmək üçün
+            return true;
+        } catch (Exception e) {
+            // Digər token xətaları
+            return true;
+        }
     }
 
-    public String generateToken(User user) {
+    // Access Token üçün yoxlama (Yalnız istifadəçi adını və vaxt aşımını yoxlayır)
+    public boolean tokenControl(String jwt, UserDetails userDetails) {
+        final String username = findUsername(jwt);
+
+        return (username.equals(userDetails.getUsername())
+                && !isTokenExpired(jwt));
+    }
+
+    // VERIFICATION Tokenin etibarlılığını yoxlayır (resend-otp üçün)
+    public boolean isVerificationTokenValid(String jwt) {
+        try {
+            String tokenType = exportToken(jwt, claims -> (String) claims.get("type"));
+            return "VERIFICATION".equals(tokenType) && !isTokenExpired(jwt);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Qısa müddətli Qeydiyyat/Təsdiqləmə Tokeni (10 dəqiqə)
+    public String generateVerificationToken(User user) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
-        claims.put("role", user.getRole().name());
+        claims.put("type", "VERIFICATION");
 
         return Jwts.builder()
                 .setClaims(claims)
                 .setSubject(user.getEmail())
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24)) // 1 day
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 10))
+                .signWith(getKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    // Uzun müddətli Refresh Token (7 gün) - Artıq daxil edilib
+    public String generateRefreshToken(User user) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId());
+        claims.put("type", "REFRESH");
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(user.getEmail())
+                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setExpiration(new Date(System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 7))
+                .signWith(getKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    // Əsas Access Token (1 gün) - Artıq daxil edilib
+    public String generateToken(User user) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId());
+        claims.put("role", user.getRole().name());
+        claims.put("type", "ACCESS");
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(user.getEmail())
+                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24))
                 .signWith(getKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
