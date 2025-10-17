@@ -38,10 +38,6 @@ public class JwtService {
         });
     }
 
-    public String extractRole(String token) {
-        return exportToken(token, claims -> (String) claims.get("role"));
-    }
-
     public <T> T exportToken(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = Jwts.parserBuilder()
                 .setSigningKey(getKey())
@@ -77,32 +73,9 @@ public class JwtService {
                 && !isTokenExpired(jwt));
     }
 
-    // VERIFICATION Tokenin etibarlılığını yoxlayır (resend-otp üçün)
-    public boolean isVerificationTokenValid(String jwt) {
-        try {
-            String tokenType = exportToken(jwt, claims -> (String) claims.get("type"));
-            return "VERIFICATION".equals(tokenType) && !isTokenExpired(jwt);
-        } catch (Exception e) {
-            return false;
-        }
-    }
+    // Qeyd: Verification token metodları (generateVerificationToken, isVerificationTokenValid) silindi.
 
-    // Qısa müddətli Qeydiyyat/Təsdiqləmə Tokeni (10 dəqiqə)
-    public String generateVerificationToken(User user) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", user.getId());
-        claims.put("type", "VERIFICATION");
-
-        return Jwts.builder()
-                .setClaims(claims)
-                .setSubject(user.getEmail())
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 10))
-                .signWith(getKey(), SignatureAlgorithm.HS256)
-                .compact();
-    }
-
-    // Uzun müddətli Refresh Token (7 gün) - Artıq daxil edilib
+    // Refresh Token (7 gün)
     public String generateRefreshToken(User user) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
@@ -117,7 +90,7 @@ public class JwtService {
                 .compact();
     }
 
-    // Əsas Access Token (1 gün) - Artıq daxil edilib
+    // Access Token (15 dəqiqə)
     public String generateToken(User user) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", user.getId());
@@ -128,7 +101,7 @@ public class JwtService {
                 .setClaims(claims)
                 .setSubject(user.getEmail())
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24))
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 15)) // 15 dəqiqə
                 .signWith(getKey(), SignatureAlgorithm.HS256)
                 .compact();
     }

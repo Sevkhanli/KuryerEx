@@ -3,6 +3,7 @@ package org.example.services.Impl;
 import lombok.RequiredArgsConstructor;
 import org.example.DTOs.request.LoginRequestDTO;
 import org.example.DTOs.request.RegisterRequestDTO;
+import org.example.DTOs.request.ResendRequestDTO;
 import org.example.DTOs.request.VerifyRequestDTO;
 import org.example.DTOs.response.AuthResponseDTO;
 import org.example.entities.User;
@@ -36,7 +37,7 @@ public class UserServiceImpl implements UserService {
     private final JwtService jwtService;
     private final VerificationTokenRepository tokenRepository;
 
-    // Qeydiyyat (Register)
+    // Qeydiyyat (Register) - TOKENSİZ (Dəyişmir)
     @Override
     @Transactional
     public AuthResponseDTO registerUser(RegisterRequestDTO request) {
@@ -51,31 +52,27 @@ public class UserServiceImpl implements UserService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(Role.USER);
         user.setVerified(false);
-
         User savedUser = userRepository.save(user);
 
-        // Yeni istifadəçi olduğu üçün köhnə token yoxdur. Birbaşa yaradılır.
         String otpCode = generateOtp();
         VerificationToken token = new VerificationToken();
         token.setToken(otpCode);
         token.setUser(savedUser);
         token.setExpiryDate(LocalDateTime.now().plusMinutes(5));
-
         tokenRepository.save(token);
 
         mailService.sendOtpEmail(user.getEmail(), otpCode);
 
-        String verificationToken = jwtService.generateVerificationToken(user);
-
-        return new AuthResponseDTO(true, "Qeydiyyat uğurludur. Email təsdiqi tələb olunur.", verificationToken);
+        // JWT token qaytarılmır.
+        return new AuthResponseDTO(true, "Qeydiyyat uğurludur. Email təsdiqi tələb olunur.");
     }
 
-    // Təsdiqləmə (Verify)
+    // Təsdiqləmə (Verify) - İNDİ ARTIQ BURADA DA JWT YARANMIR!
     @Override
     @Transactional
-    public AuthResponseDTO verifyUser(Long userId, VerifyRequestDTO request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException("User tapılmadı."));
+    public AuthResponseDTO verifyUser(VerifyRequestDTO request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new UserNotFoundException("Qeyd olunan email ilə istifadəçi tapılmadı."));
 
         if (user.isVerified()) {
             throw new UserAlreadyVerifiedException("Bu istifadəçi artıq təsdiqlənib.");
@@ -94,34 +91,30 @@ public class UserServiceImpl implements UserService {
             throw new InvalidOtpException("Daxil etdiyiniz OTP kodu yanlışdır.");
         }
 
+        // Uğurlu təsdiqləmə
         user.setVerified(true);
         userRepository.save(user);
-
-        // Təsdiqləmədən sonra token silinir.
         tokenRepository.delete(verificationToken);
 
-        String accessToken = jwtService.generateToken(user);
-        String refreshToken = jwtService.generateRefreshToken(user);
-
-        return new AuthResponseDTO(true, "Email uğurla təsdiqləndi. Giriş tokenləri yaradıldı.", accessToken, refreshToken);
+        // *** DƏYİŞİKLİK BURADADIR ***
+        // Access və Refresh tokenlər yaradılmır və qaytarılmır.
+        return new AuthResponseDTO(true, "Email uğurla təsdiqləndi. İndi giriş edə bilərsiniz.");
     }
 
-    // OTP-ni Yenidən Göndər (Resend)
+    // OTP-ni Yenidən Göndər (Resend) - TOKENSİZ (Dəyişmir)
     @Override
     @Transactional
-    public void resendOtp(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException("User tapılmadı."));
+    public void resendOtp(ResendRequestDTO request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new UserNotFoundException("Qeyd olunan email ilə istifadəçi tapılmadı."));
 
         if (user.isVerified()) {
             throw new UserAlreadyVerifiedException("Bu istifadəçi artıq təsdiqlənib.");
         }
 
-        // *** DÜZƏLİŞ: Duplicate Entry xətasını həll etmək üçün
-        // Köhnə tokeni silir və DƏRHALL BAZAYA YAZILMASINI (FLUSH) təmin edirik.
         tokenRepository.findByUser(user).ifPresent(token -> {
             tokenRepository.delete(token);
-            tokenRepository.flush(); // Silməni dərhal icra etmək üçün.
+            tokenRepository.flush();
         });
 
         String newOtpCode = generateOtp();
@@ -129,14 +122,12 @@ public class UserServiceImpl implements UserService {
         newToken.setToken(newOtpCode);
         newToken.setUser(user);
         newToken.setExpiryDate(LocalDateTime.now().plusMinutes(5));
-
-        // Yeni token yaradılır
         tokenRepository.save(newToken);
 
         mailService.sendOtpEmail(user.getEmail(), newOtpCode);
     }
 
-    // Giriş (Login)
+    // Giriş (Login) - YALNIZ BURADA JWT (ACCESS/REFRESH) YARANIR (Dəyişmir)
     @Override
     @Transactional
     public AuthResponseDTO loginUser(LoginRequestDTO request) {
@@ -145,12 +136,10 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new UserNotFoundException("Mobil nömrə və ya şifrə yanlışdır."));
 
         if (!user.isVerified()) {
-            // Əgər istifadəçi təsdiqlənməyibsə, ona yeni bir VERIFICATION tokeni veririk.
-
-            // *** DÜZƏLİŞ: Köhnə tokeni silmək və dərhal flush etmək.
+            // Təsdiqlənməyibsə: Yeni OTP göndərilir, JWT qaytarılmır.
             tokenRepository.findByUser(user).ifPresent(token -> {
                 tokenRepository.delete(token);
-                tokenRepository.flush(); // Silməni dərhal icra etmək üçün.
+                tokenRepository.flush();
             });
 
             String newOtpCode = generateOtp();
@@ -162,11 +151,10 @@ public class UserServiceImpl implements UserService {
 
             mailService.sendOtpEmail(user.getEmail(), newOtpCode);
 
-            String verificationToken = jwtService.generateVerificationToken(user);
-
-            throw new UserNotVerifiedException("Giriş üçün email təsdiqi tələb olunur.", verificationToken);
+            throw new UserNotVerifiedException("Giriş üçün email təsdiqi tələb olunur. Yeni OTP kodu email ünvanınıza göndərildi.");
         }
 
+        // UĞURLU GİRİŞ: Access və Refresh tokenlər yaradılır.
         try {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
@@ -185,11 +173,9 @@ public class UserServiceImpl implements UserService {
         }
     }
 
-    // REFRESH TOKEN METODU
+    // REFRESH TOKEN METODU (Dəyişmir)
     @Override
     public AuthResponseDTO refreshToken(String refreshToken) {
-
-        // 1. Tokenin növünü yoxla
         Object tokenType = null;
         try {
             tokenType = jwtService.exportToken(refreshToken, claims -> claims.get("type"));
@@ -201,19 +187,15 @@ public class UserServiceImpl implements UserService {
             throw new InvalidTokenException("Daxil edilən token növü Refresh Token deyil.");
         }
 
-        // 2. Refresh Token-dən istifadəçi emailini çıxar
         String userEmail = jwtService.findUsername(refreshToken);
 
-        // 3. İstifadəçini tap
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new UserNotFoundException("Refresh Token-ə uyğun istifadəçi tapılmadı."));
 
-        // 4. Tokenin vaxtının bitib-bitmədiyini yoxla
         if (jwtService.isTokenExpired(refreshToken)) {
             throw new InvalidTokenException("Refresh Token-in vaxtı bitib. Zəhmət olmasa yenidən giriş edin.");
         }
 
-        // 5. Yeni Access Token və Refresh Token yarat
         String newAccessToken = jwtService.generateToken(user);
         String newRefreshToken = jwtService.generateRefreshToken(user);
 

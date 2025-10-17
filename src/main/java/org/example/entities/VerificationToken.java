@@ -24,8 +24,6 @@ public class VerificationToken {
     @Column(nullable = false)
     private LocalDateTime expiryDate; // Kodun bitmə vaxtı
 
-    // 'User' cədvəli ilə əlaqə (One-to-One)
-    // 'fetch = FetchType.EAGER' - Tokeni çəkəndə User məlumatlarını da gətirir.
     @OneToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id", nullable = false)
     private User user; // Hansı istifadəçiyə aid olduğu
